@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Voice Bot</title>
+</head>
+<body>
+  <button id="startButton">Start Recording</button>
+  <button id="stopButton" disabled>Stop Recording</button>
+</body>
+<script>
+    
+    let mediaRecorder;
+let socket;
+let silenceTimer;
+
+document.getElementById('startButton').addEventListener('click', startRecording);
+document.getElementById('stopButton').addEventListener('click', stopRecording);
+
+function startRecording() {
+  navigator.mediaDevices.getUserMedia({ audio: true })
+    .then((stream) => {
+      mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      socket = new WebSocket('wss://api.deepgram.com/v1/listen', ['token', '09c7b3da197690c8f6f3527d92b8a0a513ba9825']);
+
+      socket.onopen = () => {
+        console.log('WebSocket connection opened.');
+
+        mediaRecorder.addEventListener('dataavailable', (event) => {
+          if (event.data && event.data.size > 0) {
+            socket.send(event.data);
+            console.log('Sent audio chunk to WebSocket.');
+          }
+        });
+
+        mediaRecorder.start(250);
+        console.log('MediaRecorder started.');
+        document.getElementById('startButton').disabled = true;
+        document.getElementById('stopButton').disabled = false;
+      };
+
+      socket.onmessage = (message) => {
+        const received = JSON.parse(message.data);
+        const transcript = received.channel.alternatives[0].transcript;
+        console.log('Received transcript:', transcript);
+
+        clearTimeout(silenceTimer);
+        silenceTimer = setTimeout(() => {
+          console.log('No speech detected. Stopping recording...');
+          stopRecording();
+        }, 5000);
+      };
+
+      socket.onerror = (error) => {
+        console.error('WebSocket error:', error);
+      };
+
+      socket.onclose = () => {
+        console.log('WebSocket connection closed.');
+      };
+
+      mediaRecorder.onstop = () => {
+        console.log('MediaRecorder stopped.');
+        stream.getTracks().forEach((track) => track.stop());
+        document.getElementById('startButton').disabled = false;
+        document.getElementById('stopButton').disabled = true;
+      };
+
+      mediaRecorder.onerror = (error) => {
+        console.error('MediaRecorder error:', error);
+      };
+    })
+    .catch((error) => {
+      console.error('Error accessing audio stream:', error);
+    });
+}
+
+function stopRecording() {
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.stop();
+    socket.close();
+  }
+}
+
+</script>
+</html>
